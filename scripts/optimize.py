@@ -95,19 +95,38 @@ def read_file_content(filepath):
         return ""
 
 
-def detect_unused(project_dir, images, strict=False):
-    source_files = find_source_files(project_dir)
+def parse_import_paths(project_dir, strict=False):
+    imported_paths = set()
+    import_pattern = re.compile(r"""from\s+['"](.+?\.(?:png|jpg|jpeg|webp))['"]""", re.IGNORECASE)
 
-    all_source_content = ""
-    uncommented_content = ""
+    source_files = find_source_files(project_dir)
     for sf in source_files:
         content = read_file_content(sf)
-        all_source_content += content + "\n"
-        lines = content.split("\n")
-        for line in lines:
+        for line in content.split("\n"):
             stripped = line.strip()
-            if not stripped.startswith("//") and not stripped.startswith("*") and not stripped.startswith("/*"):
-                uncommented_content += line + "\n"
+            if strict and stripped.startswith("//"):
+                continue
+            match = import_pattern.search(line)
+            if match:
+                raw_path = match.group(1)
+                if raw_path.startswith("assets/"):
+                    imported_paths.add(raw_path)
+                elif raw_path.startswith("./") or raw_path.startswith("../"):
+                    abs_path = os.path.normpath(os.path.join(os.path.dirname(sf), raw_path))
+                    imported_paths.add(os.path.relpath(abs_path, project_dir))
+                else:
+                    imported_paths.add(raw_path)
+
+    return imported_paths
+
+
+def detect_unused(project_dir, images, strict=False):
+    imported_paths = parse_import_paths(project_dir, strict=strict)
+
+    imported_abs = set()
+    for p in imported_paths:
+        abs_p = os.path.normpath(os.path.join(project_dir, p))
+        imported_abs.add(abs_p)
 
     used = []
     unused = []
@@ -115,37 +134,17 @@ def detect_unused(project_dir, images, strict=False):
     base_dir = assets_dir if os.path.isdir(assets_dir) else project_dir
 
     for img_path in images:
-        filename = os.path.basename(img_path)
-        rel_path = os.path.relpath(img_path, project_dir)
-
-        search_content = uncommented_content if strict else all_source_content
-
-        is_referenced = False
-        if filename in search_content:
-            is_referenced = True
-        elif rel_path in search_content:
-            is_referenced = True
-        elif rel_path.replace(os.sep, "/") in search_content:
-            is_referenced = True
-        else:
-            name_no_ext = os.path.splitext(filename)[0]
-            pattern = re.compile(
-                r"""['"`/]""" + re.escape(filename) + r"""['"`\s;,)]""",
-                re.IGNORECASE,
-            )
-            if pattern.search(search_content):
-                is_referenced = True
-
+        norm_path = os.path.normpath(img_path)
         size = os.path.getsize(img_path)
         entry = {
             "path": img_path,
             "rel_path": os.path.relpath(img_path, base_dir),
-            "filename": filename,
+            "filename": os.path.basename(img_path),
             "size": size,
             "size_human": format_size(size),
         }
 
-        if is_referenced:
+        if norm_path in imported_abs:
             used.append(entry)
         else:
             unused.append(entry)
