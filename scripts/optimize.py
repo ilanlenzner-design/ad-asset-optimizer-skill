@@ -96,7 +96,12 @@ def read_file_content(filepath):
 
 def parse_import_paths(project_dir, strict=False):
     imported_paths = set()
-    import_pattern = re.compile(r"""from\s+['"](.+?\.(?:png|jpg|jpeg|webp))['"]""", re.IGNORECASE)
+    img_ext = r'\.(?:png|jpg|jpeg|webp)'
+    patterns = [
+        re.compile(r"""from\s+['"](.+?""" + img_ext + r""")['"]""", re.IGNORECASE),
+        re.compile(r"""url\(\s*['"]?(.+?""" + img_ext + r""")['"]?\s*\)""", re.IGNORECASE),
+        re.compile(r"""(?:src|href)\s*=\s*['"](.+?""" + img_ext + r""")['"]""", re.IGNORECASE),
+    ]
 
     source_files = find_source_files(project_dir)
     for sf in source_files:
@@ -105,16 +110,16 @@ def parse_import_paths(project_dir, strict=False):
             stripped = line.strip()
             if strict and stripped.startswith("//"):
                 continue
-            match = import_pattern.search(line)
-            if match:
-                raw_path = match.group(1)
-                if raw_path.startswith("assets/"):
-                    imported_paths.add(raw_path)
-                elif raw_path.startswith("./") or raw_path.startswith("../"):
-                    abs_path = os.path.normpath(os.path.join(os.path.dirname(sf), raw_path))
-                    imported_paths.add(os.path.relpath(abs_path, project_dir))
-                else:
-                    imported_paths.add(raw_path)
+            for pattern in patterns:
+                for match in pattern.finditer(line):
+                    raw_path = match.group(1)
+                    if raw_path.startswith("assets/"):
+                        imported_paths.add(raw_path)
+                    elif raw_path.startswith("./") or raw_path.startswith("../"):
+                        abs_path = os.path.normpath(os.path.join(os.path.dirname(sf), raw_path))
+                        imported_paths.add(os.path.relpath(abs_path, project_dir))
+                    else:
+                        imported_paths.add(raw_path)
 
     return imported_paths
 
