@@ -51,40 +51,47 @@ Unused (37 files, 380 KB):
   ...
 ```
 
-### Step 3: Get User Confirmation
+### Step 3: Run Compression + Detect Unused
 
-Before making changes, confirm:
-1. Which unused files to delete
-2. Whether to compress all used files
-3. Whether to create backups
-
-### Step 4: Run Optimization
-
-Execute the full optimization:
+Run compression and/or detect unused assets. `--delete-unused` does NOT delete files — it creates a `.deletion_manifest.json` listing what would be deleted:
 
 ```bash
-# Full optimization: compress used + delete unused
+# Compress used + list unused for review
 python3 /Users/ilan/.claude/skills/ad-asset-optimizer/scripts/optimize.py \
   --dir /path/to/game/project \
   --compress --delete-unused
 
-# Compress only (don't delete anything)
+# Compress only (don't touch unused)
 python3 /Users/ilan/.claude/skills/ad-asset-optimizer/scripts/optimize.py \
   --dir /path/to/game/project \
   --compress
 
-# Delete unused only (don't compress)
+# List unused only (no compression)
 python3 /Users/ilan/.claude/skills/ad-asset-optimizer/scripts/optimize.py \
   --dir /path/to/game/project \
   --delete-unused
-
-# Keep backups of deleted files
-python3 /Users/ilan/.claude/skills/ad-asset-optimizer/scripts/optimize.py \
-  --dir /path/to/game/project \
-  --compress --delete-unused --backup
 ```
 
-### Step 5: Present Final Report
+### Step 4: Get User Approval for Deletion
+
+Present the unused files list from the manifest to the user and ask for confirmation before deleting.
+
+### Step 5: Confirm Deletion
+
+After the user approves, run with `--confirm-delete` to actually delete the files:
+
+```bash
+python3 /Users/ilan/.claude/skills/ad-asset-optimizer/scripts/optimize.py \
+  --dir /path/to/game/project \
+  --confirm-delete
+
+# With backups
+python3 /Users/ilan/.claude/skills/ad-asset-optimizer/scripts/optimize.py \
+  --dir /path/to/game/project \
+  --confirm-delete --backup
+```
+
+### Step 6: Present Final Report
 
 The script outputs a JSON report. Present it as a readable summary:
 
@@ -107,23 +114,19 @@ The script outputs a JSON report. Present it as a readable summary:
 
 ## How Unused Detection Works
 
-The script detects unused assets by:
+The script parses exact ES6 import paths from source files (primarily `GameResources.ts`):
 
 1. **Scanning all image files** in the `assets/` directory recursively
-2. **Parsing source files** (`.ts`, `.js`, `.tsx`, `.jsx`, `.css`) for references:
-   - ES6 import statements: `import X from 'assets/images/file.png'`
-   - Require calls: `require('assets/images/file.png')`
-   - CSS url() references: `url('assets/fonts/file.woff')`
-   - String literals containing the filename
-3. **An image is "used"** if its filename appears in ANY source file (even as a partial match)
-4. **An image is "unused"** if no source file references it at all
+2. **Parsing import statements** from `.ts`, `.js`, `.tsx`, `.jsx`, `.css` files using regex:
+   - Extracts paths like `from 'assets/images/ui/IQBar.png'`
+   - Resolves relative paths (`./`, `../`) to absolute
+3. **An image is "used"** if its exact path matches an import statement
+4. **An image is "unused"** if no import references it
 
-### Edge Cases Handled
+### Edge Cases
 
-- **Commented-out imports**: Still detected as referenced (conservative). The `--strict` flag ignores commented imports.
-- **Frame sequences**: Individual frames (click_00003.png) often unused when a sprite sheet exists
-- **Min variants**: Both `Button.png` and `Button-min.png` checked independently
-- **Marketing assets**: `game-capture.jpg` at root level flagged if unreferenced
+- **Commented-out imports**: By default treated as referenced (conservative). Use `--strict` to ignore them.
+- **Two-step deletion**: `--delete-unused` only creates a manifest. `--confirm-delete` actually deletes after user approval.
 
 ## Integration with Apollo
 

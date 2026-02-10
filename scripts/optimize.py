@@ -298,47 +298,36 @@ def run_optimize(project_dir, images, api_key, do_compress=False, do_delete=Fals
                 print(f"ERROR: {e}")
                 compress_errors.append({"file": rel, "error": str(e)})
 
-    deleted_results = []
-    deleted_total_size = 0
-
     if do_delete and unused:
+        manifest_path = os.path.join(project_dir, ".deletion_manifest.json")
+        unused_size = sum(e["size"] for e in unused)
+        manifest = {
+            "project": os.path.basename(project_dir),
+            "project_dir": project_dir,
+            "total_unused_files": len(unused),
+            "total_unused_size": unused_size,
+            "total_unused_size_human": format_size(unused_size),
+            "files": [
+                {"path": e["path"], "rel_path": e["rel_path"], "filename": e["filename"],
+                 "size": e["size"], "size_human": e["size_human"]}
+                for e in sorted(unused, key=lambda x: -x["size"])
+            ],
+        }
+        with open(manifest_path, "w") as f:
+            json.dump(manifest, f, indent=2)
+
         print(f"\n{'='*60}")
-        print(f"  Deleting {len(unused)} unused assets")
+        print(f"  Unused Assets Pending Deletion ({len(unused)} files, {format_size(unused_size)})")
+        print(f"{'='*60}\n")
+        for entry in sorted(unused, key=lambda x: -x["size"]):
+            print(f"    {entry['rel_path']:50s} {entry['size_human']:>10s}")
+        print(f"\n  Manifest saved to: {manifest_path}")
+        print(f"  Run with --confirm-delete to delete these files after review.")
         print(f"{'='*60}\n")
 
-        for entry in unused:
-            fpath = entry["path"]
-            rel = entry["rel_path"]
-            size = entry["size"]
-
-            try:
-                if backup:
-                    backup_dir = os.path.join(project_dir, ".deleted_assets_backup")
-                    backup_path = os.path.join(backup_dir, entry["rel_path"])
-                    os.makedirs(os.path.dirname(backup_path), exist_ok=True)
-                    shutil.copy2(fpath, backup_path)
-
-                os.remove(fpath)
-                deleted_total_size += size
-                deleted_results.append({"file": rel, "size": size, "size_human": entry["size_human"]})
-                print(f"  Deleted: {rel} ({entry['size_human']})")
-            except Exception as e:
-                print(f"  ERROR deleting {rel}: {e}")
-
-        parent_dirs = set()
-        for entry in unused:
-            parent_dirs.add(os.path.dirname(entry["path"]))
-        for d in sorted(parent_dirs, key=len, reverse=True):
-            try:
-                if os.path.isdir(d) and not os.listdir(d):
-                    os.rmdir(d)
-                    print(f"  Removed empty directory: {os.path.relpath(d, project_dir)}")
-            except Exception:
-                pass
-
-    final_size = initial_total_size - total_compressed_saved - deleted_total_size
-    final_file_count = initial_file_count - len(deleted_results)
-    total_reduction = total_compressed_saved + deleted_total_size
+    final_size = initial_total_size - total_compressed_saved
+    final_file_count = initial_file_count
+    total_reduction = total_compressed_saved
     total_reduction_pct = (total_reduction / initial_total_size * 100) if initial_total_size > 0 else 0
 
     print(f"\n{'='*60}")
@@ -358,8 +347,9 @@ def run_optimize(project_dir, images, api_key, do_compress=False, do_delete=Fals
             print(f"  Already optimal:  {skipped_count} files")
         if compress_errors:
             print(f"  Compress errors:  {len(compress_errors)}")
-    if do_delete:
-        print(f"  Deleted unused:   {len(deleted_results)} files ({format_size(deleted_total_size)} removed)")
+    if do_delete and unused:
+        pending_size = sum(e["size"] for e in unused)
+        print(f"  Pending deletion: {len(unused)} files ({format_size(pending_size)}) — awaiting user approval")
     print()
     print(f"  Total reduction:  {format_size(total_reduction)} saved ({total_reduction_pct:.1f}%)")
     print(f"  Final ad weight:  {format_size(final_size)}")
@@ -389,11 +379,11 @@ def run_optimize(project_dir, images, api_key, do_compress=False, do_delete=Fals
             "results": compressed_results,
             "errors": compress_errors,
         },
-        "deletion": {
-            "files_deleted": len(deleted_results),
-            "bytes_freed": deleted_total_size,
-            "size_human": format_size(deleted_total_size),
-            "items": deleted_results,
+        "deletion_pending": {
+            "files": len(unused) if do_delete else 0,
+            "size_bytes": sum(e["size"] for e in unused) if do_delete else 0,
+            "size_human": format_size(sum(e["size"] for e in unused)) if (do_delete and unused) else "0 B",
+            "manifest": os.path.join(project_dir, ".deletion_manifest.json") if do_delete else None,
         },
         "total_saved_bytes": total_reduction,
         "total_saved_pct": round(total_reduction_pct, 1),
@@ -406,12 +396,84 @@ def run_optimize(project_dir, images, api_key, do_compress=False, do_delete=Fals
     return report
 
 
+def run_confirm_delete(project_dir, backup=False):
+    manifest_path = os.path.join(project_dir, ".deletion_manifest.json")
+    if not os.path.exists(manifest_path):
+        print("ERROR: No deletion manifest found. Run with --delete-unused first.", file=sys.stderr)
+        sys.exit(1)
+
+    with open(manifest_path, "r") as f:
+        manifest = json.load(f)
+
+    files = manifest.get("files", [])
+    if not files:
+        print("Manifest is empty — nothing to delete.")
+        os.remove(manifest_path)
+        return {"deleted": 0, "freed_bytes": 0}
+
+    print(f"\n{'='*60}")
+    print(f"  Deleting {len(files)} unused assets")
+    print(f"{'='*60}\n")
+
+    deleted_results = []
+    deleted_total_size = 0
+
+    for entry in files:
+        fpath = entry["path"]
+        rel = entry["rel_path"]
+        size = entry["size"]
+
+        if not os.path.exists(fpath):
+            print(f"  SKIP (already gone): {rel}")
+            continue
+
+        try:
+            if backup:
+                backup_dir = os.path.join(project_dir, ".deleted_assets_backup")
+                backup_path = os.path.join(backup_dir, rel)
+                os.makedirs(os.path.dirname(backup_path), exist_ok=True)
+                shutil.copy2(fpath, backup_path)
+
+            os.remove(fpath)
+            deleted_total_size += size
+            deleted_results.append({"file": rel, "size": size, "size_human": entry["size_human"]})
+            print(f"  Deleted: {rel} ({entry['size_human']})")
+        except Exception as e:
+            print(f"  ERROR deleting {rel}: {e}")
+
+    parent_dirs = set()
+    for entry in files:
+        parent_dirs.add(os.path.dirname(entry["path"]))
+    for d in sorted(parent_dirs, key=len, reverse=True):
+        try:
+            if os.path.isdir(d) and not os.listdir(d):
+                os.rmdir(d)
+                print(f"  Removed empty directory: {os.path.relpath(d, project_dir)}")
+        except Exception:
+            pass
+
+    os.remove(manifest_path)
+
+    print(f"\n  Deleted {len(deleted_results)} files, freed {format_size(deleted_total_size)}")
+    print(f"{'='*60}\n")
+
+    result = {
+        "deleted": len(deleted_results),
+        "freed_bytes": deleted_total_size,
+        "freed_human": format_size(deleted_total_size),
+        "items": deleted_results,
+    }
+    print(json.dumps(result, indent=2))
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description="Optimize game ad assets")
     parser.add_argument("--dir", required=True, help="Game project directory")
     parser.add_argument("--analyze", action="store_true", help="Analyze only — no changes")
     parser.add_argument("--compress", action="store_true", help="Compress used images via TinyPNG")
-    parser.add_argument("--delete-unused", action="store_true", help="Delete unused image assets")
+    parser.add_argument("--delete-unused", action="store_true", help="List unused assets and create deletion manifest")
+    parser.add_argument("--confirm-delete", action="store_true", help="Delete files listed in the manifest (requires prior --delete-unused run)")
     parser.add_argument("--backup", action="store_true", help="Keep backups before changes")
     parser.add_argument("--strict", action="store_true", help="Ignore commented-out imports when detecting usage")
     args = parser.parse_args()
@@ -419,6 +481,10 @@ def main():
     if not os.path.isdir(args.dir):
         print(f"ERROR: Directory not found: {args.dir}", file=sys.stderr)
         sys.exit(1)
+
+    if args.confirm_delete:
+        run_confirm_delete(args.dir, backup=args.backup)
+        return
 
     images = find_images(args.dir)
     if not images:
@@ -432,7 +498,7 @@ def main():
         run_optimize(args.dir, images, api_key, do_compress=args.compress,
                      do_delete=args.delete_unused, backup=args.backup, strict=args.strict)
     else:
-        print("Specify --analyze, --compress, or --delete-unused. Use --help for details.")
+        print("Specify --analyze, --compress, --delete-unused, or --confirm-delete. Use --help for details.")
         sys.exit(1)
 
 
