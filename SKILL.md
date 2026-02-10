@@ -51,47 +51,33 @@ Unused (37 files, 380 KB):
   ...
 ```
 
-### Step 3: Run Compression + Detect Unused
+### Step 3: Run Optimization
 
-Run compression and/or detect unused assets. `--delete-unused` does NOT delete files — it creates a `.deletion_manifest.json` listing what would be deleted:
+Run compression and/or delete unused assets. `--delete-unused` directly deletes files not imported in source code:
 
 ```bash
-# Compress used + list unused for review
+# Compress used + delete unused (full optimization)
 python3 /Users/ilan/.claude/skills/ad-asset-optimizer/scripts/optimize.py \
   --dir /path/to/game/project \
-  --compress --delete-unused
+  --compress --delete-unused --strict
 
 # Compress only (don't touch unused)
 python3 /Users/ilan/.claude/skills/ad-asset-optimizer/scripts/optimize.py \
   --dir /path/to/game/project \
   --compress
 
-# List unused only (no compression)
+# Delete unused only (no compression)
 python3 /Users/ilan/.claude/skills/ad-asset-optimizer/scripts/optimize.py \
   --dir /path/to/game/project \
-  --delete-unused
+  --delete-unused --strict
+
+# With backups (copies deleted files to .deleted_assets_backup/)
+python3 /Users/ilan/.claude/skills/ad-asset-optimizer/scripts/optimize.py \
+  --dir /path/to/game/project \
+  --compress --delete-unused --strict --backup
 ```
 
-### Step 4: Get User Approval for Deletion
-
-Present the unused files list from the manifest to the user and ask for confirmation before deleting.
-
-### Step 5: Confirm Deletion
-
-After the user approves, run with `--confirm-delete` to actually delete the files:
-
-```bash
-python3 /Users/ilan/.claude/skills/ad-asset-optimizer/scripts/optimize.py \
-  --dir /path/to/game/project \
-  --confirm-delete
-
-# With backups
-python3 /Users/ilan/.claude/skills/ad-asset-optimizer/scripts/optimize.py \
-  --dir /path/to/game/project \
-  --confirm-delete --backup
-```
-
-### Step 6: Present Final Report
+### Step 4: Present Final Report
 
 The script outputs a JSON report. Present it as a readable summary:
 
@@ -126,7 +112,7 @@ The script parses exact ES6 import paths from source files (primarily `GameResou
 ### Edge Cases
 
 - **Commented-out imports**: By default treated as referenced (conservative). Use `--strict` to ignore them.
-- **Two-step deletion**: `--delete-unused` only creates a manifest. `--confirm-delete` actually deletes after user approval.
+- **Backup mode**: Use `--backup` to copy files to `.deleted_assets_backup/` before deleting.
 
 ## Integration with Apollo
 

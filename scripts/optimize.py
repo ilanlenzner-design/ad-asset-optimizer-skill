@@ -23,7 +23,6 @@ import shutil
 import sys
 import urllib.request
 import urllib.error
-from pathlib import Path
 
 TINIFY_URL = "https://api.tinify.com/shrink"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
@@ -245,127 +244,6 @@ def run_analyze(project_dir, images, strict=False):
     return result
 
 
-def generate_review_html(project_dir, sorted_unused, manifest):
-    project_name = os.path.basename(project_dir)
-    cards = []
-    for i, entry in enumerate(sorted_unused):
-        abs_path = entry["path"]
-        rel_display = entry["rel_path"]
-        fname = entry["filename"]
-        size_h = entry["size_human"]
-        cards.append(
-            f'<div class="card" data-index="{i}">'
-            f'<label class="cb-wrap"><input type="checkbox" checked data-index="{i}"><span class="check"></span></label>'
-            f'<img src="file://{abs_path}" alt="{fname}" onerror="this.src=\'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%2280%22><rect fill=%22%23333%22 width=%2280%22 height=%2280%22/><text fill=%22%23888%22 x=%2240%22 y=%2244%22 text-anchor=%22middle%22 font-size=%2210%22>no preview</text></svg>\'">'
-            f'<div class="info"><span class="name" title="{rel_display}">{fname}</span><span class="size">{size_h}</span></div>'
-            f'</div>'
-        )
-    cards_html = "\n".join(cards)
-
-    manifest_json = json.dumps(manifest, indent=2)
-
-    html = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Delete Review - {project_name}</title>
-<style>
-*{{margin:0;padding:0;box-sizing:border-box}}
-body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#1a1a2e;color:#e0e0e0;min-height:100vh}}
-.header{{background:#16213e;padding:20px 32px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #0f3460;position:sticky;top:0;z-index:10}}
-.header h1{{font-size:20px;font-weight:600}}
-.header .subtitle{{color:#888;font-size:14px;margin-top:4px}}
-.actions{{display:flex;gap:12px;align-items:center}}
-.btn{{padding:10px 24px;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:all .15s}}
-.btn-save{{background:#e94560;color:#fff}}
-.btn-save:hover{{background:#c73751}}
-.btn-toggle{{background:#0f3460;color:#e0e0e0;border:1px solid #1a1a4e}}
-.btn-toggle:hover{{background:#1a1a4e}}
-.counter{{font-size:14px;color:#888;min-width:180px;text-align:right}}
-.grid{{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:16px;padding:24px 32px}}
-.card{{background:#16213e;border-radius:12px;overflow:hidden;border:2px solid transparent;transition:all .15s;position:relative}}
-.card.unchecked{{opacity:.35;border-color:#333}}
-.card.unchecked img{{filter:grayscale(1)}}
-.cb-wrap{{position:absolute;top:8px;left:8px;z-index:2;cursor:pointer}}
-.cb-wrap input{{display:none}}
-.check{{display:block;width:24px;height:24px;border-radius:6px;background:rgba(0,0,0,.5);border:2px solid #555;transition:all .15s}}
-.cb-wrap input:checked+.check{{background:#e94560;border-color:#e94560}}
-.cb-wrap input:checked+.check::after{{content:'\\2715';display:block;color:#fff;text-align:center;font-size:14px;line-height:20px;font-weight:700}}
-.card img{{width:100%;aspect-ratio:1;object-fit:contain;background:#111;padding:8px}}
-.info{{padding:8px 10px}}
-.name{{display:block;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
-.size{{display:block;font-size:11px;color:#888;margin-top:2px}}
-</style>
-</head>
-<body>
-<div class="header">
-<div>
-<h1>Unused Assets Review - {project_name}</h1>
-<div class="subtitle">Checked assets will be deleted. Uncheck to keep.</div>
-</div>
-<div class="actions">
-<button class="btn btn-toggle" onclick="toggleAll()">Toggle All</button>
-<button class="btn btn-save" onclick="saveManifest()">Save &amp; Download Manifest</button>
-<div class="counter" id="counter"></div>
-</div>
-</div>
-<div class="grid">{cards_html}</div>
-<script>
-const manifest = {manifest_json};
-function updateCounter(){{
-  const checked=document.querySelectorAll('.card input:checked').length;
-  const total=document.querySelectorAll('.card input').length;
-  let size=0;
-  document.querySelectorAll('.card input:checked').forEach(cb=>{{
-    size+=manifest.files[cb.dataset.index].size;
-  }});
-  const h=size<1024?size+' B':size<1048576?(size/1024).toFixed(1)+' KB':(size/1048576).toFixed(2)+' MB';
-  document.getElementById('counter').textContent=checked+'/'+total+' selected ('+h+')';
-}}
-document.querySelectorAll('.card input').forEach(cb=>{{
-  cb.addEventListener('change',function(){{
-    this.closest('.card').classList.toggle('unchecked',!this.checked);
-    updateCounter();
-  }});
-}});
-function toggleAll(){{
-  const cbs=document.querySelectorAll('.card input');
-  const allChecked=[...cbs].every(c=>c.checked);
-  cbs.forEach(c=>{{c.checked=!allChecked;c.closest('.card').classList.toggle('unchecked',allChecked)}});
-  updateCounter();
-}}
-function saveManifest(){{
-  const kept=[];
-  const selected=[];
-  document.querySelectorAll('.card input').forEach(cb=>{{
-    if(cb.checked) selected.push(manifest.files[cb.dataset.index]);
-    else kept.push(manifest.files[cb.dataset.index].filename);
-  }});
-  const updated=Object.assign({{}},manifest,{{
-    files:selected,
-    total_unused_files:selected.length,
-    total_unused_size:selected.reduce((s,f)=>s+f.size,0),
-    total_unused_size_human:(selected.reduce((s,f)=>s+f.size,0)/1024).toFixed(1)+' KB'
-  }});
-  const blob=new Blob([JSON.stringify(updated,null,2)],{{type:'application/json'}});
-  const a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='.deletion_manifest.json';
-  a.click();
-  if(kept.length){{alert('Manifest saved! Kept '+kept.length+' asset(s).\\nMove the downloaded file to:\\n'+manifest.project_dir+'/\\nThen run --confirm-delete.');}}
-  else{{alert('Manifest saved (all '+selected.length+' files selected for deletion).\\nMove the downloaded file to:\\n'+manifest.project_dir+'/\\nThen run --confirm-delete.');}}
-}}
-updateCounter();
-</script>
-</body>
-</html>"""
-
-    review_path = os.path.join(project_dir, ".deletion_review.html")
-    with open(review_path, "w") as f:
-        f.write(html)
-    return review_path
-
-
 def run_optimize(project_dir, images, api_key, do_compress=False, do_delete=False, backup=False, strict=False):
     used, unused = detect_unused(project_dir, images, strict=strict)
 
@@ -386,8 +264,6 @@ def run_optimize(project_dir, images, api_key, do_compress=False, do_delete=Fals
         for i, entry in enumerate(used, 1):
             fpath = entry["path"]
             rel = entry["rel_path"]
-            original_size = entry["size"]
-
             try:
                 print(f"  [{i}/{len(used)}] {rel} ({entry['size_human']})...", end=" ", flush=True)
                 output_url, input_size, output_size, compression_count = compress_file(fpath, api_key)
@@ -419,41 +295,47 @@ def run_optimize(project_dir, images, api_key, do_compress=False, do_delete=Fals
                 print(f"ERROR: {e}")
                 compress_errors.append({"file": rel, "error": str(e)})
 
+    deleted_results = []
+    deleted_total_size = 0
+
     if do_delete and unused:
-        manifest_path = os.path.join(project_dir, ".deletion_manifest.json")
-        unused_size = sum(e["size"] for e in unused)
-        sorted_unused = sorted(unused, key=lambda x: -x["size"])
-        manifest = {
-            "project": os.path.basename(project_dir),
-            "project_dir": project_dir,
-            "total_unused_files": len(unused),
-            "total_unused_size": unused_size,
-            "total_unused_size_human": format_size(unused_size),
-            "files": [
-                {"path": e["path"], "rel_path": e["rel_path"], "filename": e["filename"],
-                 "size": e["size"], "size_human": e["size_human"]}
-                for e in sorted_unused
-            ],
-        }
-        with open(manifest_path, "w") as f:
-            json.dump(manifest, f, indent=2)
-
-        review_path = generate_review_html(project_dir, sorted_unused, manifest)
-
         print(f"\n{'='*60}")
-        print(f"  Unused Assets Pending Deletion ({len(unused)} files, {format_size(unused_size)})")
-        print(f"{'='*60}\n")
-        for entry in sorted_unused:
-            print(f"    {entry['rel_path']:50s} {entry['size_human']:>10s}")
-        print(f"\n  Manifest saved to: {manifest_path}")
-        print(f"  Review page: {review_path}")
-        print(f"  Open the review page to visually inspect and unselect assets to keep.")
-        print(f"  Then run with --confirm-delete to delete the selected files.")
+        print(f"  Deleting {len(unused)} unused assets (not imported in source)")
         print(f"{'='*60}\n")
 
-    final_size = initial_total_size - total_compressed_saved
-    final_file_count = initial_file_count
-    total_reduction = total_compressed_saved
+        for entry in unused:
+            fpath = entry["path"]
+            rel = entry["rel_path"]
+            size = entry["size"]
+
+            try:
+                if backup:
+                    backup_dir = os.path.join(project_dir, ".deleted_assets_backup")
+                    backup_path = os.path.join(backup_dir, entry["rel_path"])
+                    os.makedirs(os.path.dirname(backup_path), exist_ok=True)
+                    shutil.copy2(fpath, backup_path)
+
+                os.remove(fpath)
+                deleted_total_size += size
+                deleted_results.append({"file": rel, "size": size, "size_human": entry["size_human"]})
+                print(f"  Deleted: {rel} ({entry['size_human']})")
+            except Exception as e:
+                print(f"  ERROR deleting {rel}: {e}")
+
+        parent_dirs = set()
+        for entry in unused:
+            parent_dirs.add(os.path.dirname(entry["path"]))
+        for d in sorted(parent_dirs, key=len, reverse=True):
+            try:
+                if os.path.isdir(d) and not os.listdir(d):
+                    os.rmdir(d)
+                    print(f"  Removed empty directory: {os.path.relpath(d, project_dir)}")
+            except Exception:
+                pass
+
+    final_size = initial_total_size - total_compressed_saved - deleted_total_size
+    final_file_count = initial_file_count - len(deleted_results)
+    total_reduction = total_compressed_saved + deleted_total_size
     total_reduction_pct = (total_reduction / initial_total_size * 100) if initial_total_size > 0 else 0
 
     print(f"\n{'='*60}")
@@ -473,9 +355,8 @@ def run_optimize(project_dir, images, api_key, do_compress=False, do_delete=Fals
             print(f"  Already optimal:  {skipped_count} files")
         if compress_errors:
             print(f"  Compress errors:  {len(compress_errors)}")
-    if do_delete and unused:
-        pending_size = sum(e["size"] for e in unused)
-        print(f"  Pending deletion: {len(unused)} files ({format_size(pending_size)}) — awaiting user approval")
+    if do_delete:
+        print(f"  Deleted unused:   {len(deleted_results)} files ({format_size(deleted_total_size)} removed)")
     print()
     print(f"  Total reduction:  {format_size(total_reduction)} saved ({total_reduction_pct:.1f}%)")
     print(f"  Final ad weight:  {format_size(final_size)}")
@@ -505,11 +386,11 @@ def run_optimize(project_dir, images, api_key, do_compress=False, do_delete=Fals
             "results": compressed_results,
             "errors": compress_errors,
         },
-        "deletion_pending": {
-            "files": len(unused) if do_delete else 0,
-            "size_bytes": sum(e["size"] for e in unused) if do_delete else 0,
-            "size_human": format_size(sum(e["size"] for e in unused)) if (do_delete and unused) else "0 B",
-            "manifest": os.path.join(project_dir, ".deletion_manifest.json") if do_delete else None,
+        "deletion": {
+            "files_deleted": len(deleted_results),
+            "bytes_freed": deleted_total_size,
+            "size_human": format_size(deleted_total_size),
+            "items": deleted_results,
         },
         "total_saved_bytes": total_reduction,
         "total_saved_pct": round(total_reduction_pct, 1),
@@ -522,84 +403,12 @@ def run_optimize(project_dir, images, api_key, do_compress=False, do_delete=Fals
     return report
 
 
-def run_confirm_delete(project_dir, backup=False):
-    manifest_path = os.path.join(project_dir, ".deletion_manifest.json")
-    if not os.path.exists(manifest_path):
-        print("ERROR: No deletion manifest found. Run with --delete-unused first.", file=sys.stderr)
-        sys.exit(1)
-
-    with open(manifest_path, "r") as f:
-        manifest = json.load(f)
-
-    files = manifest.get("files", [])
-    if not files:
-        print("Manifest is empty — nothing to delete.")
-        os.remove(manifest_path)
-        return {"deleted": 0, "freed_bytes": 0}
-
-    print(f"\n{'='*60}")
-    print(f"  Deleting {len(files)} unused assets")
-    print(f"{'='*60}\n")
-
-    deleted_results = []
-    deleted_total_size = 0
-
-    for entry in files:
-        fpath = entry["path"]
-        rel = entry["rel_path"]
-        size = entry["size"]
-
-        if not os.path.exists(fpath):
-            print(f"  SKIP (already gone): {rel}")
-            continue
-
-        try:
-            if backup:
-                backup_dir = os.path.join(project_dir, ".deleted_assets_backup")
-                backup_path = os.path.join(backup_dir, rel)
-                os.makedirs(os.path.dirname(backup_path), exist_ok=True)
-                shutil.copy2(fpath, backup_path)
-
-            os.remove(fpath)
-            deleted_total_size += size
-            deleted_results.append({"file": rel, "size": size, "size_human": entry["size_human"]})
-            print(f"  Deleted: {rel} ({entry['size_human']})")
-        except Exception as e:
-            print(f"  ERROR deleting {rel}: {e}")
-
-    parent_dirs = set()
-    for entry in files:
-        parent_dirs.add(os.path.dirname(entry["path"]))
-    for d in sorted(parent_dirs, key=len, reverse=True):
-        try:
-            if os.path.isdir(d) and not os.listdir(d):
-                os.rmdir(d)
-                print(f"  Removed empty directory: {os.path.relpath(d, project_dir)}")
-        except Exception:
-            pass
-
-    os.remove(manifest_path)
-
-    print(f"\n  Deleted {len(deleted_results)} files, freed {format_size(deleted_total_size)}")
-    print(f"{'='*60}\n")
-
-    result = {
-        "deleted": len(deleted_results),
-        "freed_bytes": deleted_total_size,
-        "freed_human": format_size(deleted_total_size),
-        "items": deleted_results,
-    }
-    print(json.dumps(result, indent=2))
-    return result
-
-
 def main():
     parser = argparse.ArgumentParser(description="Optimize game ad assets")
     parser.add_argument("--dir", required=True, help="Game project directory")
     parser.add_argument("--analyze", action="store_true", help="Analyze only — no changes")
     parser.add_argument("--compress", action="store_true", help="Compress used images via TinyPNG")
-    parser.add_argument("--delete-unused", action="store_true", help="List unused assets and create deletion manifest")
-    parser.add_argument("--confirm-delete", action="store_true", help="Delete files listed in the manifest (requires prior --delete-unused run)")
+    parser.add_argument("--delete-unused", action="store_true", help="Delete unused assets (not imported in source code)")
     parser.add_argument("--backup", action="store_true", help="Keep backups before changes")
     parser.add_argument("--strict", action="store_true", help="Ignore commented-out imports when detecting usage")
     args = parser.parse_args()
@@ -607,10 +416,6 @@ def main():
     if not os.path.isdir(args.dir):
         print(f"ERROR: Directory not found: {args.dir}", file=sys.stderr)
         sys.exit(1)
-
-    if args.confirm_delete:
-        run_confirm_delete(args.dir, backup=args.backup)
-        return
 
     images = find_images(args.dir)
     if not images:
@@ -624,7 +429,7 @@ def main():
         run_optimize(args.dir, images, api_key, do_compress=args.compress,
                      do_delete=args.delete_unused, backup=args.backup, strict=args.strict)
     else:
-        print("Specify --analyze, --compress, --delete-unused, or --confirm-delete. Use --help for details.")
+        print("Specify --analyze, --compress, or --delete-unused. Use --help for details.")
         sys.exit(1)
 
 
