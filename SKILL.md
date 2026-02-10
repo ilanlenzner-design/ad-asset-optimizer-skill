@@ -1,6 +1,6 @@
 ---
 name: ad-asset-optimizer
-description: Optimize and clean up game ad assets before delivery. Detects unused images by analyzing source code imports, compresses used images via TinyPNG, and deletes unused assets. Use when (1) an ad is ready for delivery and needs optimization, (2) the user wants to clean up ad assets, (3) detect unused images in a game project, (4) optimize ad weight/size, or (5) mentions "optimize ad", "clean up assets", "ad ready", "unused assets", "ad weight", or "asset cleanup". Requires TINYPNG_API_KEY environment variable.
+description: Optimize game ad assets for delivery. Parses GameResources.ts imports to identify used vs unused images, compresses used assets via TinyPNG, and deletes unused ones. Use when optimizing ad weight, cleaning up assets, or preparing an ad for delivery. Trigger phrases: "optimize ad", "clean up assets", "ad ready", "unused assets", "ad weight". Requires TINYPNG_API_KEY.
 ---
 
 # Ad Asset Optimizer
